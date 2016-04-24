@@ -53,4 +53,16 @@ The "radblock-users" s3 bucket is configured to delete all files after 24 hours:
 
 **gif rotator**
 
-We have another s3 bucket called "random.radblock.xyz". Every 30 seconds, a lambda function is scheduled to pick a random file from "gifs.radblock.xyz" and save it into "random.radblock.xyz/the.gif". That's where the browser plugin will look for gif replacement.
+We have another s3 bucket called "random.radblock.xyz". Every minute or so, a lambda function is scheduled to find all the files in the "gifs.radblock.xyz" bucket, randomize their order, and save a list of their urls into "random.radblock.xyz/thelist". It'll look something like this:
+
+```json
+[
+  "http://gifs.radblock.xyz/some.gif",
+  "http://gifs.radblock.xyz/another.gif",
+  "http://gifs.radblock.xyz/one-last.gif"
+]
+```
+
+**browser plugin**
+
+whenever you go to a page, the browser plugin will download the latest list of gifs from "random.radblock.xyz/thelist", and then insert those gifs onto the page.
