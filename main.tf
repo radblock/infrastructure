@@ -98,44 +98,32 @@ resource "aws_route53_record" "gifs" {
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #
-#   random.radblock.xyz
+#   list.radblock.xyz
 #
-#   a function for returning a random gif from the gif bucket
+#   a bucket with a list of all the files in the gifs bucket
 #
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-# make a role that can get a list of all the gifs in the bucket
+# make a bucket
 
-resource "aws_iam_role" "iam_for_random_giffer" {
-    name = "iam_for_uploader"
-    assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "Stmt1458531615000",
-      "Effect": "Allow",
-      "Action": [
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::${var.gifs.s3_bucket}"
-      ]
-    }
-  ]
-}
-EOF
+resource "aws_s3_bucket" "list" {
+  provider = "aws.prod"
+  bucket = "${var.list_s3_bucket}"
+  acl = "public-read"
 }
 
-# make a lambda function, using that role, for choosing one at random
-# https://github.com/radblock/show-a-gif
+# point list.radblock.xyz to that bucket
 
-resource "aws_lambda_function" "random_giffer" {
-    filename = "random_giffer.zip"
-    function_name = "random_gif"
-    role = "${aws_iam_role.iam_for_random_giffer.arn}"
-    handler = "exports.handler"
-    source_code_hash = "${base64sha256(file("random_giffer.zip"))}"
+resource "aws_route53_record" "list" {
+  zone_id = "${aws_route53_zone.primary.zone_id}"
+  name = "${var.list_s3_bucket}"
+  type = "A"
+
+  alias {
+    name = "${aws_s3_bucket.list.website_domain}"
+    zone_id = "${aws_s3_bucket.list.hosted_zone_id}"
+    evaluate_target_health = true
+  }
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -217,5 +205,52 @@ resource "aws_lambda_function" "uploader" {
     role = "${aws_iam_role.iam_for_uploader.arn}"
     handler = "exports.handler"
     source_code_hash = "${base64sha256(file("uploader.zip"))}"
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+#
+#   accountant
+#
+#   this lambda function is called whenever "gifs.radblock.xyz" changes
+#   (when a gif expires or is uploaded).
+#
+#   It makes a list of all the gifs in that bucket, and saves it into
+#   the "list.radblock.xyz" bucket.
+#
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+# create a role for the gif uploader that can upload gifs to the gif bucket
+
+resource "aws_iam_role" "iam_for_accountant" {
+    name = "iam_for_accountant"
+    assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Stmt1458531615000",
+      "Effect": "Allow",
+      "Action": [
+        "*"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${var.gifs_s3_bucket}",
+        "arn:aws:s3:::${var.list_s3_bucket}/*"
+      ]
+    }
+  ]
+}
+EOF
+}
+
+# create a function to sign s3 upload requests using that role
+# https://github.com/radblock/gimme
+
+resource "aws_lambda_function" "uploader" {
+    filename = "accountant.zip"
+    function_name = "accountant"
+    role = "${aws_iam_role.iam_for_accountant.arn}"
+    handler = "exports.handler"
+    source_code_hash = "${base64sha256(file("accountant.zip"))}"
 }
 

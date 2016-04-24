@@ -59,9 +59,9 @@ the "gifs.radblock.xyz" s3 bucket is configured to delete all files after a week
 
 The "radblock-users" s3 bucket is configured to delete all files after 24 hours: this is how we'll handle upload limiting. If there's a file in the bucket with your name on it, you can't upload another gif.
 
-**gif rotator**
+**accountant**
 
-We have another s3 bucket called "random.radblock.xyz". Every minute or so, a lambda function is scheduled to find all the files in the "gifs.radblock.xyz" bucket, randomize their order, and save a list of their urls into "random.radblock.xyz/thelist". It'll look something like this:
+Every time the contents of "gifs.radblock.xyz" change, a lambda function called "accountant" makes a list of all the gifs, and puts that list into a new s3 bucket called "list.radblock.xyz". The list looks something like this:
 
 ```json
 [
@@ -73,4 +73,4 @@ We have another s3 bucket called "random.radblock.xyz". Every minute or so, a la
 
 **browser plugin**
 
-whenever you go to a page, the browser plugin will download the latest list of gifs from "random.radblock.xyz/thelist", and then insert those gifs onto the page.
+whenever you go to a page, the browser plugin will download the latest list of gifs from "list.radblock.xyz", and then randomly insert those gifs onto the page.
