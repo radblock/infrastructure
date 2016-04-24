@@ -15,4 +15,6 @@ cd repos ;
     zip -r ../list-s3-bucket.zip . ;
   cd .. ;
 
+  git clone git@github.com:radblock/website.git ;
+
 cd .. ;
