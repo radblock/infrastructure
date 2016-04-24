@@ -244,7 +244,7 @@ EOF
 }
 
 # create a function to sign s3 upload requests using that role
-# https://github.com/radblock/gimme
+# https://github.com/radblock/accountant
 
 resource "aws_lambda_function" "uploader" {
     filename = "accountant.zip"
