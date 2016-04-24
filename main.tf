@@ -181,20 +181,14 @@ resource "aws_route53_record" "website" {
 # the website needs to know about the uploader
 
 resource "template_file" "website_config" {
-  template = <<EOF
-    {
-      "signatory": "${signatory}",
-      "bucket": "${bucket}",
-      "region": "${region}"
-    }
-EOF
+  template = "${file("deps.tpl")}"
   vars {
     signatory = "${aws_api_gateway_resource.signatory.path}"
     region = "us-east-1"
     bucket = "${aws_s3_bucket.website.bucket}"
   }
   provisioner "local-exec" {
-    command = "echo \"${template_file.website_config.rendered}\" > deps.json"
+    command = "echo '${template_file.website_config.rendered}' > repos/website/deps.json"
   }
 }
 
@@ -279,7 +273,9 @@ resource "aws_lambda_function" "signatory" {
   source_code_hash = "${base64sha256(file("repos/uploader.zip"))}"
 }
 
-# # api gateway crap to make the lambda function visible
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# api gateway crap to make the uploader function visible
+# amazon says they're gonna change this so we need less crap here
 
 resource "aws_api_gateway_rest_api" "signatory" {
   name = "signatory_api"
@@ -291,19 +287,20 @@ resource "aws_api_gateway_resource" "signatory" {
   path_part = "signatory"
 }
 
+resource "aws_api_gateway_deployment" "signatory" {
+  depends_on = ["aws_api_gateway_integration.signatory"]
+  stage_name = "prod"
+  rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+}
+
+# the POST method triggers the lambda function
+
 resource "aws_api_gateway_method" "signatory" {
   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
   resource_id = "${aws_api_gateway_resource.signatory.id}"
   http_method = "POST"
   authorization = "NONE"
 }
-
-resource "aws_api_gateway_deployment" "signatory" {
-  depends_on = ["aws_api_gateway_integration.signatory"]
-
-  rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-}
-
 resource "aws_api_gateway_integration" "signatory" {
   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
   resource_id = "${aws_api_gateway_resource.signatory.id}"
@@ -311,6 +308,23 @@ resource "aws_api_gateway_integration" "signatory" {
   type = "AWS"
   integration_http_method = "${aws_api_gateway_method.signatory.http_method}"
   uri = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/${aws_lambda_function.signatory.arn}/invocations"
+}
+
+# the OPTIONS method is necessary for CORS
+# http://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
+
+resource "aws_api_gateway_method" "signatory_options" {
+  rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+  resource_id = "${aws_api_gateway_resource.signatory.id}"
+  http_method = "OPTIONS"
+  authorization = "NONE"
+}
+resource "aws_api_gateway_integration" "signatory_options" {
+  rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+  resource_id = "${aws_api_gateway_resource.signatory.id}"
+  http_method = "${aws_api_gateway_method.signatory_options.http_method}"
+  type = "MOCK"
+  integration_http_method = "${aws_api_gateway_method.signatory_options.http_method}"
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -390,6 +404,7 @@ resource "aws_lambda_function" "accountant" {
 }
 
 # # make the s3 bucket notify the lambda function of its changes
+# # terraform claims to support this but I keep getting an error like they don't
 #
 # resource "aws_s3_bucket_notification" "bucket_notification" {
 #   bucket = "${aws_s3_bucket.gifs.id}"
