@@ -1,11 +1,18 @@
 #! /bin/bash
 
-cd repos/uploader ;
-npm install ;
-zip -r ../uploader.zip . ;
-cd ../.. ;
+mkdir repos ;
+cd repos ;
 
-cd repos/list-s3-bucket ;
-npm install ;
-zip -r ../list-s3-bucket.zip . ;
-cd ../.. ;
+  git clone git@github.com:radblock/gimme.git ;
+  cd gimme ;
+    npm install ;
+    zip -r ../uploader.zip . ;
+  cd .. ;
+
+  git clone git@github.com:radblock/list-s3-bucket.git ;
+  cd list-s3-bucket ;
+    npm install ;
+    zip -r ../list-s3-bucket.zip . ;
+  cd .. ;
+
+cd .. ;
