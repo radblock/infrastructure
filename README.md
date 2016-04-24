@@ -10,9 +10,9 @@ in order to get this project done quickly and make sure it costs no $ to operate
 
 **s3**
 
-s3 stands for "simple storage service". You make "buckets," which are kinda like folders, and then you put "objects" in them, which are exactly like files.
+s3 stands for "simple storage service". You make "buckets," which are kinda like folders, and then you put "objects" in them, which are exactly like files. 
 
-You can make a bucket public and point a domain name at it to host a website.
+You can make a bucket public and point a domain name at it to host a website. If you did so, and your bucket was called "fabulousartist.com" and then an object called "blog/my-first-post.html", you'd be able to browse to "http://fabulousartist.com/blog/my-first-post.html" and see that file.
 
 You can make a bucket private or write-only to make a file dropbox.
 
