@@ -32,6 +32,8 @@ A disadvantage is that there isn't (to my knowledge) a good way of running lambd
 
 Another disadvantage is that when your server is a program that runs for a long time, you don't really need to care about how long it takes to start up, connect to external resources, whatever. With lambda, you really do. This can make it slow if you aren't careful. Especially since you can't rely on storing information in one computer's RAM between requests, so persistent information inherently means you have to connect to something external.
 
+**also**
+
 Amazon likes giving names to things. Idk if I'd call these "products" really, but we're also using:
 
 - _API Gateway_ for pointing urls at lambda functions
