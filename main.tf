@@ -186,9 +186,9 @@ resource "aws_route53_record" "website" {
 # create a policy for the gif uploader that can upload gifs to the gif bucket
 
 resource "aws_iam_role_policy" "uploader_lambda_policy" {
-    name = "uploader_lambda_policy"
-    role = "${aws_iam_role.uploader_lambda_role.id}"
-    policy = <<EOF
+  name = "uploader_lambda_policy"
+  role = "${aws_iam_role.uploader_lambda_role.id}"
+  policy = <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -215,8 +215,8 @@ EOF
 # attach it to a role
 
 resource "aws_iam_role" "uploader_lambda_role" {
-    name = "uploader_lambda_role"
-    assume_role_policy = <<EOF
+  name = "uploader_lambda_role"
+  assume_role_policy = <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -263,9 +263,9 @@ resource "aws_lambda_function" "uploader" {
 # and write to the list bucket
 
 resource "aws_iam_role_policy" "accountant_lambda_policy" {
-    name = "accountant_lambda_policy"
-    role = "${aws_iam_role.accountant_lambda_role.id}"
-    policy = <<EOF
+  name = "accountant_lambda_policy"
+  role = "${aws_iam_role.accountant_lambda_role.id}"
+  policy = <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -288,8 +288,8 @@ EOF
 # attach it to a role
 
 resource "aws_iam_role" "accountant_lambda_role" {
-    name = "accountant_lambda_role"
-    assume_role_policy = <<EOF
+  name = "accountant_lambda_role"
+  assume_role_policy = <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
