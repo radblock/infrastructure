@@ -4,6 +4,10 @@
 #  ██╔══██╗██╔══██║██║  ██║██╔══██╗██║     ██║   ██║██║     ██╔═██╗
 #  ██║  ██║██║  ██║██████╔╝██████╔╝███████╗╚██████╔╝╚██████╗██║  ██╗
 #  ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝
+
+
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #
 #  This is a [terraform](https://github.com/hashicorp/terraform)
 #  configuration for deploying RADBLOCK.
@@ -19,14 +23,19 @@
 #
 #  See http://github.com/radblock for more info
 #
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 # use amazon web services
 
 provider "aws" {
   alias = "prod"
   region = "us-east-1"
-  access_key = "${var.prod_access_key}"
-  secret_key = "${var.prod_secret_key}"
+  access_key = "${var.access_key}"
+  secret_key = "${var.secret_key}"
+}
+
+resource "aws_route53_zone" "primary" {
+   name = "radblock.xyz"
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -80,6 +89,9 @@ resource "aws_s3_bucket" "gifs" {
       days = 7
     }
   }
+  website {
+    index_document = "index.html"
+  }
 }
 
 # point gifs.radblock.xyz to the bucket
@@ -110,6 +122,9 @@ resource "aws_s3_bucket" "list" {
   provider = "aws.prod"
   bucket = "${var.list_s3_bucket}"
   acl = "public-read"
+  website {
+    index_document = "list.json"
+  }
 }
 
 # point list.radblock.xyz to that bucket
@@ -168,11 +183,12 @@ resource "aws_route53_record" "website" {
 #
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-# create a role for the gif uploader that can upload gifs to the gif bucket
+# create a policy for the gif uploader that can upload gifs to the gif bucket
 
-resource "aws_iam_role" "iam_for_uploader" {
-    name = "iam_for_uploader"
-    assume_role_policy = <<EOF
+resource "aws_iam_role_policy" "uploader_lambda_policy" {
+    name = "uploader_lambda_policy"
+    role = "${aws_iam_role.uploader_lambda_role.id}"
+    policy = <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -196,20 +212,44 @@ resource "aws_iam_role" "iam_for_uploader" {
 EOF
 }
 
+# attach it to a role
+
+resource "aws_iam_role" "uploader_lambda_role" {
+    name = "uploader_lambda_role"
+    assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+
 # create a function to sign s3 upload requests using that role
 # https://github.com/radblock/gimme
 
 resource "aws_lambda_function" "uploader" {
-    filename = "uploader.zip"
-    function_name = "upload_gif"
-    role = "${aws_iam_role.iam_for_uploader.arn}"
-    handler = "exports.handler"
-    source_code_hash = "${base64sha256(file("uploader.zip"))}"
+  filename = "repos/uploader.zip"
+  function_name = "upload_gif"
+  role = "${aws_iam_role.uploader_lambda_role.arn}"
+  handler = "main.handler"
+  source_code_hash = "${base64sha256(file("repos/uploader.zip"))}"
+  provisioner "local-exec" {
+    command = "zip -r repos/uploader.zip repos/uploader"
+  }
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #
-#   accountant
+#   list-s3-bucket
 #
 #   this lambda function is called whenever "gifs.radblock.xyz" changes
 #   (when a gif expires or is uploaded).
@@ -219,11 +259,13 @@ resource "aws_lambda_function" "uploader" {
 #
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-# create a role for the gif uploader that can upload gifs to the gif bucket
+# create a policy that can read from the gifs bucket
+# and write to the list bucket
 
-resource "aws_iam_role" "iam_for_accountant" {
-    name = "iam_for_accountant"
-    assume_role_policy = <<EOF
+resource "aws_iam_role_policy" "accountant_lambda_policy" {
+    name = "accountant_lambda_policy"
+    role = "${aws_iam_role.accountant_lambda_role.id}"
+    policy = <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -243,14 +285,38 @@ resource "aws_iam_role" "iam_for_accountant" {
 EOF
 }
 
-# create a function to sign s3 upload requests using that role
-# https://github.com/radblock/gimme
+# attach it to a role
 
-resource "aws_lambda_function" "uploader" {
-    filename = "accountant.zip"
-    function_name = "accountant"
-    role = "${aws_iam_role.iam_for_accountant.arn}"
-    handler = "exports.handler"
-    source_code_hash = "${base64sha256(file("accountant.zip"))}"
+resource "aws_iam_role" "accountant_lambda_role" {
+    name = "accountant_lambda_role"
+    assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+
+# create a function to make a list of gifs and put it in a bucket
+# https://github.com/radblock/list-s3-bucket
+
+resource "aws_lambda_function" "accountant" {
+  filename = "repos/list-s3-bucket.zip"
+  function_name = "accountant"
+  role = "${aws_iam_role.accountant_lambda_role.arn}"
+  handler = "main.handler"
+  source_code_hash = "${base64sha256(file("repos/list-s3-bucket.zip"))}"
+  provisioner "local-exec" {
+    command = "zip -r repos/accountant.zip repos/list-s3-bucket"
+  }
 }
 
