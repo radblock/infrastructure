@@ -187,7 +187,7 @@ resource "template_file" "website_config" {
       "bucket": "${bucket}",
       "region": "${region}"
     }
-  EOF
+EOF
   vars {
     signatory = "${aws_api_gateway_resource.signatory.path}"
     region = "us-east-1"
