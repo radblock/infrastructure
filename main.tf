@@ -163,23 +163,23 @@ resource "aws_route53_record" "website" {
 
 # the website needs to know about the signatory
 
-resource "template_file" "website_deps" {
+resource "template_file" "website" {
   depends_on = ["null_resource.clone"]
-  template = "${file("repos/website/deps.tpl")}"
+  template = "${file("deps/website.tpl")}"
   vars {
     signatory = "${aws_api_gateway_resource.signatory.path}"
     region = "us-east-1"
     bucket = "${aws_s3_bucket.website.bucket}"
   }
   provisioner "local-exec" {
-    command = "echo '${template_file.website_deps.rendered}' > repos/website/deps.json"
+    command = "echo '${template_file.website.rendered}' > repos/website/deps.json"
   }
 }
 
  # build the website
 
 resource "null_resource" "build_website" {
-  depends_on = ["template_file.website_deps", "aws_s3_bucket.website"]
+  depends_on = ["template_file.website", "aws_s3_bucket.website"]
   provisioner "local-exec" {
     command = "cd repos/website ; npm run deploy"
   }
@@ -249,32 +249,32 @@ EOF
 # https://github.com/radblock/gimme
 
 resource "aws_lambda_function" "signatory" {
-  depends_on = ["template_file.signatory_deps"]
+  depends_on = ["null_resource.build_signatory"]
   provider = "aws.prod"
   filename = "repos/signatory.zip"
   function_name = "upload_gif"
   role = "${aws_iam_role.signatory_lambda_role.arn}"
   handler = "main.handler"
-  source_code_hash = "${base64sha256(file("repos/signatory.zip"))}"
+  # source_code_hash = "${base64sha256(file("repos/signatory.zip"))}"
 }
 
 # the website needs to know about the signatory
 
-resource "template_file" "signatory_deps" {
+resource "template_file" "signatory" {
   depends_on = ["null_resource.clone"]
-  template = "${file("repos/signatory/deps.tpl")}"
+  template = "${file("deps/signatory.tpl")}"
   vars {
     bucket = "${aws_s3_bucket.gifs.bucket}"
   }
   provisioner "local-exec" {
-    command = "echo '${template_file.website_deps.rendered}' > repos/website/deps.json"
+    command = "echo '${template_file.signatory.rendered}' > repos/signatory/deps.json"
   }
 }
 
 # build the signatory
 
 resource "null_resource" "build_signatory" {
-  depends_on = ["template_file.signatory_deps"]
+  depends_on = ["template_file.signatory"]
   provisioner "local-exec" {
     command = "cd repos/gimme ; npm run deploy ; zip -r ../signatory.zip ."
   }
@@ -405,9 +405,9 @@ resource "aws_lambda_function" "list_s3_bucket" {
   function_name = "list_s3_bucket"
   role = "${aws_iam_role.list_s3_bucket_lambda_role.arn}"
   handler = "main.handler"
-  source_code_hash = "${base64sha256(file("repos/list-s3-bucket.zip"))}"
+  # source_code_hash = "${base64sha256(file("repos/list-s3-bucket.zip"))}"
   provisioner "local-exec" {
-    command = "zip -r repos/list_s3_bucket.zip repos/list-s3-bucket"
+    command = "cd repos/list_s3_bucket ; zip -r repos/list_s3_bucket.zip ."
   }
 }
 
@@ -436,22 +436,22 @@ resource "aws_lambda_permission" "allow_bucket" {
 
 # the list_s3_bucket needs to know about the gifs bucket and the list bucket
 
-resource "template_file" "list_s3_bucket_deps" {
+resource "template_file" "list_s3_bucket" {
   depends_on = ["null_resource.clone"]
-  template = "${file("repos/list-s3-bucket/deps.tpl")}"
+  template = "${file("deps/list-s3-bucket.tpl")}"
   vars {
-    gifs_bucket = "${aws_s3_bucket.gifs.bucket}"
+    gif_bucket = "${aws_s3_bucket.gifs.bucket}"
     list_bucket = "${aws_s3_bucket.list.bucket}"
   }
   provisioner "local-exec" {
-    command = "echo '${template_file.website_deps.rendered}' > repos/list-s3-bucket/deps.json"
+    command = "echo '${template_file.list_s3_bucket.rendered}' > repos/list-s3-bucket/deps.json"
   }
 }
 
  # build the list_s3_bucket
 
 resource "null_resource" "build_list_s3_bucket" {
-  depends_on = ["template_file.list_s3_bucket_deps", "aws_s3_bucket.website"]
+  depends_on = ["template_file.list_s3_bucket", "aws_s3_bucket.website"]
   provisioner "local-exec" {
     command = "cd repos/list-s3-bucket ; npm run deploy ; zip -r ../list_s3_bucket.zip ."
   }

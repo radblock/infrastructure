@@ -6,7 +6,7 @@ mkdir repos ;
 cd repos ;
 
   git clone git@github.com:radblock/signatory.git ;
-  cd gimme ;
+  cd signatory ;
     npm install ;
   cd .. ;
 
