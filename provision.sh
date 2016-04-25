@@ -5,7 +5,7 @@ rm -rf repos ;
 mkdir repos ;
 cd repos ;
 
-  git clone git@github.com:radblock/gimme.git ;
+  git clone git@github.com:radblock/signatory.git ;
   cd gimme ;
     npm install ;
   cd .. ;

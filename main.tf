@@ -84,7 +84,7 @@ resource "aws_s3_bucket" "gifs" {
   force_destroy = true
   bucket = "${var.gifs_s3_bucket}"
   acl = "public-read"
-  // allow the uploader on the website to upload to this bucket
+  // allow the signatory on the website to upload to this bucket
   cors_rule {
     allowed_origins = [ "https://${var.website_s3_bucket}" ]
     allowed_methods = [ "PUT", "GET" ]
@@ -121,14 +121,14 @@ resource "aws_route53_record" "gifs" {
 #
 #   radblock.xyz
 #
-#   this is the main website with marketing + the gif uploader
+#   this is the main website with marketing + the gif signatory
 #
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 # make a bucket
 
 resource "null_resource" "deploy_website" {
-  depends_on "null_resource.clone"
+  depends_on = ["null_resource.clone"]
 
   provisioner "local-exec" {
     command = "cd repos/website ; npm run deploy"
@@ -161,7 +161,7 @@ resource "aws_route53_record" "website" {
   }
 }
 
-# the website needs to know about the uploader
+# the website needs to know about the signatory
 
 resource "template_file" "website_deps" {
   depends_on = ["null_resource.clone"]
@@ -187,18 +187,18 @@ resource "null_resource" "build_website" {
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #
-#   uploader
+#   signatory
 #
-#   this is the gif uploader's backend function
+#   this is the gif signatory's backend function
 #
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-# create a policy for the gif uploader that can upload gifs to the gif bucket
+# create a policy for the gif signatory that can upload gifs to the gif bucket
 
-resource "aws_iam_role_policy" "uploader_lambda_policy" {
+resource "aws_iam_role_policy" "signatory_lambda_policy" {
   provider = "aws.prod"
-  name = "uploader_lambda_policy"
-  role = "${aws_iam_role.uploader_lambda_role.id}"
+  name = "signatory_lambda_policy"
+  role = "${aws_iam_role.signatory_lambda_role.id}"
   policy = <<EOF
 {
   "Version": "2012-10-17",
@@ -225,9 +225,9 @@ EOF
 
 # attach it to a role
 
-resource "aws_iam_role" "uploader_lambda_role" {
+resource "aws_iam_role" "signatory_lambda_role" {
   provider = "aws.prod"
-  name = "uploader_lambda_role"
+  name = "signatory_lambda_role"
   assume_role_policy = <<EOF
 {
   "Version": "2012-10-17",
@@ -249,20 +249,20 @@ EOF
 # https://github.com/radblock/gimme
 
 resource "aws_lambda_function" "signatory" {
-  depends_on = ["template_file.uploader_deps"]
+  depends_on = ["template_file.signatory_deps"]
   provider = "aws.prod"
-  filename = "repos/uploader.zip"
+  filename = "repos/signatory.zip"
   function_name = "upload_gif"
-  role = "${aws_iam_role.uploader_lambda_role.arn}"
+  role = "${aws_iam_role.signatory_lambda_role.arn}"
   handler = "main.handler"
-  source_code_hash = "${base64sha256(file("repos/uploader.zip"))}"
+  source_code_hash = "${base64sha256(file("repos/signatory.zip"))}"
 }
 
-# the website needs to know about the uploader
+# the website needs to know about the signatory
 
-resource "template_file" "uploader_deps" {
+resource "template_file" "signatory_deps" {
   depends_on = ["null_resource.clone"]
-  template = "${file("repos/uploader/deps.tpl")}"
+  template = "${file("repos/signatory/deps.tpl")}"
   vars {
     bucket = "${aws_s3_bucket.gifs.bucket}"
   }
@@ -271,17 +271,17 @@ resource "template_file" "uploader_deps" {
   }
 }
 
-# build the uploader
+# build the signatory
 
-resource "null_resource" "build_uploader" {
-  depends_on = ["template_file.uploader_deps"]
+resource "null_resource" "build_signatory" {
+  depends_on = ["template_file.signatory_deps"]
   provisioner "local-exec" {
-    command = "cd repos/gimme ; npm run deploy"
+    command = "cd repos/gimme ; npm run deploy ; zip -r ../signatory.zip ."
   }
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# api gateway crap to make the uploader function visible
+# api gateway crap to make the signatory function visible
 # amazon says they're gonna change this so we need less crap here
 
 resource "aws_api_gateway_rest_api" "signatory" {
@@ -349,10 +349,10 @@ resource "aws_api_gateway_integration" "signatory_options" {
 # create a policy that can read from the gifs bucket
 # and write to the list bucket
 
-resource "aws_iam_role_policy" "accountant_lambda_policy" {
+resource "aws_iam_role_policy" "list_s3_bucket_lambda_policy" {
   provider = "aws.prod"
-  name = "accountant_lambda_policy"
-  role = "${aws_iam_role.accountant_lambda_role.id}"
+  name = "list_s3_bucket_lambda_policy"
+  role = "${aws_iam_role.list_s3_bucket_lambda_role.id}"
   policy = <<EOF
 {
   "Version": "2012-10-17",
@@ -375,9 +375,9 @@ EOF
 
 # attach it to a role
 
-resource "aws_iam_role" "accountant_lambda_role" {
+resource "aws_iam_role" "list_s3_bucket_lambda_role" {
   provider = "aws.prod"
-  name = "accountant_lambda_role"
+  name = "list_s3_bucket_lambda_role"
   assume_role_policy = <<EOF
 {
   "Version": "2012-10-17",
@@ -398,15 +398,16 @@ EOF
 # create a function to make a list of gifs and put it in a bucket
 # https://github.com/radblock/list-s3-bucket
 
-resource "aws_lambda_function" "accountant" {
+resource "aws_lambda_function" "list_s3_bucket" {
+  depends_on = ["null_resource.build_list_s3_bucket"]
   provider = "aws.prod"
   filename = "repos/list-s3-bucket.zip"
-  function_name = "accountant"
-  role = "${aws_iam_role.accountant_lambda_role.arn}"
+  function_name = "list_s3_bucket"
+  role = "${aws_iam_role.list_s3_bucket_lambda_role.arn}"
   handler = "main.handler"
   source_code_hash = "${base64sha256(file("repos/list-s3-bucket.zip"))}"
   provisioner "local-exec" {
-    command = "zip -r repos/accountant.zip repos/list-s3-bucket"
+    command = "zip -r repos/list_s3_bucket.zip repos/list-s3-bucket"
   }
 }
 
@@ -416,7 +417,7 @@ resource "aws_lambda_function" "accountant" {
 # resource "aws_s3_bucket_notification" "bucket_notification" {
 #   bucket = "${aws_s3_bucket.gifs.id}"
 #   lambda_function {
-#     lambda_function_arn = "${aws_lambda_function.accountant.arn}"
+#     lambda_function_arn = "${aws_lambda_function.list_s3_bucket.arn}"
 #     events = ["s3:ObjectCreated:*", "s3:ObjectRemoved:*"]
 #     filter_prefix = ""
 #   }
@@ -428,14 +429,14 @@ resource "aws_lambda_permission" "allow_bucket" {
   provider = "aws.prod"
   statement_id = "AllowExecutionFromS3Bucket"
   action = "lambda:InvokeFunction"
-  function_name = "${aws_lambda_function.accountant.arn}"
+  function_name = "${aws_lambda_function.list_s3_bucket.arn}"
   principal = "s3.amazonaws.com"
   source_arn = "${aws_s3_bucket.gifs.arn}"
 }
 
-# the accountant needs to know about the gifs bucket and the list bucket
+# the list_s3_bucket needs to know about the gifs bucket and the list bucket
 
-resource "template_file" "accountant_deps" {
+resource "template_file" "list_s3_bucket_deps" {
   depends_on = ["null_resource.clone"]
   template = "${file("repos/list-s3-bucket/deps.tpl")}"
   vars {
@@ -447,12 +448,12 @@ resource "template_file" "accountant_deps" {
   }
 }
 
- # build the accountant
+ # build the list_s3_bucket
 
-resource "null_resource" "build_website" {
-  depends_on = ["template_file.accountant_deps", "aws_s3_bucket.website"]
+resource "null_resource" "build_list_s3_bucket" {
+  depends_on = ["template_file.list_s3_bucket_deps", "aws_s3_bucket.website"]
   provisioner "local-exec" {
-    command = "cd repos/list-s3-bucket ; npm run deploy"
+    command = "cd repos/list-s3-bucket ; npm run deploy ; zip -r ../list_s3_bucket.zip ."
   }
 }
 
