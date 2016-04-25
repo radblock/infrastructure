@@ -38,6 +38,12 @@ resource "aws_route53_zone" "primary" {
    name = "radblock.xyz"
 }
 
+resource "null_resource" "clone" {
+  provisioner "local-exec" {
+    command = "./provision.sh"
+  }
+}
+
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #
 #   users.radblock.xyz
@@ -51,6 +57,7 @@ resource "aws_route53_zone" "primary" {
 
 resource "aws_s3_bucket" "users" {
   provider = "aws.prod"
+  force_destroy = true
   bucket = "${var.users_s3_bucket}"
   acl = "private"
   lifecycle_rule {
@@ -74,6 +81,7 @@ resource "aws_s3_bucket" "users" {
 
 resource "aws_s3_bucket" "gifs" {
   provider = "aws.prod"
+  force_destroy = true
   bucket = "${var.gifs_s3_bucket}"
   acl = "public-read"
   // allow the uploader on the website to upload to this bucket
@@ -111,40 +119,6 @@ resource "aws_route53_record" "gifs" {
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #
-#   list.radblock.xyz
-#
-#   a bucket with a list of all the files in the gifs bucket
-#
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
-# make a bucket
-
-resource "aws_s3_bucket" "list" {
-  provider = "aws.prod"
-  bucket = "${var.list_s3_bucket}"
-  acl = "public-read"
-  website {
-    index_document = "list.json"
-  }
-}
-
-# point list.radblock.xyz to that bucket
-
-resource "aws_route53_record" "list" {
-  provider = "aws.prod"
-  zone_id = "${aws_route53_zone.primary.zone_id}"
-  name = "${var.list_s3_bucket}"
-  type = "A"
-
-  alias {
-    name = "${aws_s3_bucket.list.website_domain}"
-    zone_id = "${aws_s3_bucket.list.hosted_zone_id}"
-    evaluate_target_health = true
-  }
-}
-
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-#
 #   radblock.xyz
 #
 #   this is the main website with marketing + the gif uploader
@@ -153,13 +127,22 @@ resource "aws_route53_record" "list" {
 
 # make a bucket
 
+resource "null_resource" "deploy_website" {
+  depends_on "null_resource.clone"
+
+  provisioner "local-exec" {
+    command = "cd repos/website ; npm run deploy"
+  }
+}
+
 resource "aws_s3_bucket" "website" {
   provider = "aws.prod"
+  force_destroy = true
   bucket = "${var.website_s3_bucket}"
   acl = "public-read"
   website {
-    index_document = "index.html"
-    error_document = "error.html"
+    index_document = "index.html.gz"
+    error_document = "error.html.gz"
   }
 }
 
@@ -180,26 +163,27 @@ resource "aws_route53_record" "website" {
 
 # the website needs to know about the uploader
 
-resource "template_file" "website_config" {
-  template = "${file("deps.tpl")}"
+resource "template_file" "website_deps" {
+  depends_on = ["null_resource.clone"]
+  template = "${file("repos/website/deps.tpl")}"
   vars {
     signatory = "${aws_api_gateway_resource.signatory.path}"
     region = "us-east-1"
     bucket = "${aws_s3_bucket.website.bucket}"
   }
   provisioner "local-exec" {
-    command = "echo '${template_file.website_config.rendered}' > repos/website/deps.json"
+    command = "echo '${template_file.website_deps.rendered}' > repos/website/deps.json"
   }
 }
 
  # build the website
 
- resource "null_resource" "build_website" {
-   depends_on = ["template_file.website_config"]
-   provisioner "local-exec" {
-    command = "cd repos/website ; npm run build"
-   }
- }
+resource "null_resource" "build_website" {
+  depends_on = ["template_file.website_deps", "aws_s3_bucket.website"]
+  provisioner "local-exec" {
+    command = "cd repos/website ; npm run deploy"
+  }
+}
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #
@@ -265,12 +249,35 @@ EOF
 # https://github.com/radblock/gimme
 
 resource "aws_lambda_function" "signatory" {
+  depends_on = ["template_file.uploader_deps"]
   provider = "aws.prod"
   filename = "repos/uploader.zip"
   function_name = "upload_gif"
   role = "${aws_iam_role.uploader_lambda_role.arn}"
   handler = "main.handler"
   source_code_hash = "${base64sha256(file("repos/uploader.zip"))}"
+}
+
+# the website needs to know about the uploader
+
+resource "template_file" "uploader_deps" {
+  depends_on = ["null_resource.clone"]
+  template = "${file("repos/uploader/deps.tpl")}"
+  vars {
+    bucket = "${aws_s3_bucket.gifs.bucket}"
+  }
+  provisioner "local-exec" {
+    command = "echo '${template_file.website_deps.rendered}' > repos/website/deps.json"
+  }
+}
+
+# build the uploader
+
+resource "null_resource" "build_uploader" {
+  depends_on = ["template_file.uploader_deps"]
+  provisioner "local-exec" {
+    command = "cd repos/gimme ; npm run deploy"
+  }
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -424,5 +431,63 @@ resource "aws_lambda_permission" "allow_bucket" {
   function_name = "${aws_lambda_function.accountant.arn}"
   principal = "s3.amazonaws.com"
   source_arn = "${aws_s3_bucket.gifs.arn}"
+}
+
+# the accountant needs to know about the gifs bucket and the list bucket
+
+resource "template_file" "accountant_deps" {
+  depends_on = ["null_resource.clone"]
+  template = "${file("repos/list-s3-bucket/deps.tpl")}"
+  vars {
+    gifs_bucket = "${aws_s3_bucket.gifs.bucket}"
+    list_bucket = "${aws_s3_bucket.list.bucket}"
+  }
+  provisioner "local-exec" {
+    command = "echo '${template_file.website_deps.rendered}' > repos/list-s3-bucket/deps.json"
+  }
+}
+
+ # build the accountant
+
+resource "null_resource" "build_website" {
+  depends_on = ["template_file.accountant_deps", "aws_s3_bucket.website"]
+  provisioner "local-exec" {
+    command = "cd repos/list-s3-bucket ; npm run deploy"
+  }
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+#
+#   list.radblock.xyz
+#
+#   a bucket with a list of all the files in the gifs bucket
+#
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+# make a bucket
+
+resource "aws_s3_bucket" "list" {
+  provider = "aws.prod"
+  force_destroy = true
+  bucket = "${var.list_s3_bucket}"
+  acl = "public-read"
+  website {
+    index_document = "list.json"
+  }
+}
+
+# point list.radblock.xyz to that bucket
+
+resource "aws_route53_record" "list" {
+  provider = "aws.prod"
+  zone_id = "${aws_route53_zone.primary.zone_id}"
+  name = "${var.list_s3_bucket}"
+  type = "A"
+
+  alias {
+    name = "${aws_s3_bucket.list.website_domain}"
+    zone_id = "${aws_s3_bucket.list.hosted_zone_id}"
+    evaluate_target_health = true
+  }
 }
 
