@@ -50,10 +50,10 @@ The website is some html and javascript files in an s3 bucket called "radblock.x
 
 **uploading gifs**
 
-Gifs are kept in an s3 bucket called "gifs.radblock.xyz". When someone uploads a gif, javascript in their browser calls two lambda functions:
+Gifs are kept in an s3 bucket called "gifs.radblock.xyz". When someone uploads a gif, [javascript in their browser](https://github.com/radblock/website/blob/master/src/index.html) calls two lambda functions:
 
 - first, a function verifies their payment with [stripe](//stripe.com), and gets back some information about the transaction: a user id, zip code, etc. It then saves a file called that user's id into a separate s3 bucket called "radblock-users".
-- then, a function authorizes their s3 upload and passes back the authorization token.
+- then, a function authorizes their s3 upload and passes back the authorization token. **this function lives [here](https://github.com/radblock/signatory)**
 
 then the browser uploads the file to s3.
 
@@ -61,9 +61,9 @@ the "gifs.radblock.xyz" s3 bucket is configured to delete all files after a week
 
 The "radblock-users" s3 bucket is configured to delete all files after 24 hours: this is how we'll handle upload limiting. If there's a file in the bucket with your name on it, you can't upload another gif.
 
-**accountant**
+**list-s3-bucket**
 
-Every time the contents of "gifs.radblock.xyz" change, a lambda function called "accountant" makes a list of all the gifs, and puts that list into a new s3 bucket called "list.radblock.xyz". The list looks something like this:
+Every time the contents of "gifs.radblock.xyz" change, a [lambda function called "list-s3-bucket"](https://github.com/radblock/list-s3-bucket) makes a list of all the gifs, and puts that list into a new s3 bucket called "list.radblock.xyz". The list looks something like this:
 
 ```json
 [
