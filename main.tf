@@ -38,6 +38,19 @@ resource "aws_route53_zone" "primary" {
    name = "radblock.xyz"
 }
 
+resource "aws_route53_record" "ns" {
+  zone_id = "${aws_route53_zone.primary.zone_id}"
+  name = "radblock.xyz"
+  type = "NS"
+  ttl = "30"
+  records = [
+    "${aws_route53_zone.primary.name_servers.0}",
+    "${aws_route53_zone.primary.name_servers.1}",
+    "${aws_route53_zone.primary.name_servers.2}",
+    "${aws_route53_zone.primary.name_servers.3}"
+  ]
+}
+
 resource "null_resource" "clone" {
   provisioner "local-exec" {
     command = "./provision.sh"
@@ -133,8 +146,8 @@ resource "aws_s3_bucket" "website" {
   bucket = "${var.website_s3_bucket}"
   acl = "public-read"
   website {
-    index_document = "index.html.gz"
-    error_document = "error.html.gz"
+    index_document = "index.html"
+    error_document = "error.html"
   }
 }
 
@@ -160,7 +173,7 @@ resource "template_file" "website" {
   template = "${file("templates/deps-website.tpl")}"
   vars {
     # we should be getting this id programmatically, but rn the whole jawn is handled through claudia so no dice
-    signatory = "https://wqm4pi6z77.execute-api.us-east-1.amazonaws.com/latest/sign"
+    signatory = "https://lyumoiiykj.execute-api.us-east-1.amazonaws.com/latest/sign"
     region = "us-east-1"
     bucket = "${aws_s3_bucket.website.bucket}"
   }
