@@ -14,6 +14,11 @@
 #
 #  It will set up S3 buckets, Lambda functions, DNS, and whatnot.
 #
+#  It looks big and scary, but each of these blocks was pasted pretty
+#  much directly from the terraform documentation:
+#
+#    > > > > > https://www.terraform.io/docs/providers/aws/ < < < < <
+#
 #     Instructions:
 #
 #     0. Sign up for Amazon Web Services
