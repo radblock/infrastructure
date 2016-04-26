@@ -4,6 +4,8 @@ This repo contains a terraform template to automatically deploy all the other st
 
 see main.tf for wayyy more details
 
+> **warning**: everything should be pretty automatic, EXCEPT for setting up gifs.radblock.xyz as an event source for the list-s3-objects lambda function
+
 ## architecture
 
 in order to get this project done quickly and make sure it costs no $ to operate forever, we're leaning pretty heavily on Amazon Web Services, specifically two products:
