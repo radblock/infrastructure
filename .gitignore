@@ -1,3 +1,4 @@
 repos
+npm-debug.log
 terraform.tfstate
 terraform.tfstate.backup

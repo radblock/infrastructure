@@ -86,7 +86,7 @@ resource "aws_s3_bucket" "gifs" {
   acl = "public-read"
   // allow the signatory on the website to upload to this bucket
   cors_rule {
-    allowed_origins = [ "https://${var.website_s3_bucket}" ]
+    allowed_origins = [ "*" ]
     allowed_methods = [ "PUT", "GET" ]
     allowed_headers = [ "*" ]
   }
@@ -127,14 +127,6 @@ resource "aws_route53_record" "gifs" {
 
 # make a bucket
 
-resource "null_resource" "deploy_website" {
-  depends_on = ["null_resource.clone"]
-
-  provisioner "local-exec" {
-    command = "cd repos/website ; npm run deploy"
-  }
-}
-
 resource "aws_s3_bucket" "website" {
   provider = "aws.prod"
   force_destroy = true
@@ -165,9 +157,10 @@ resource "aws_route53_record" "website" {
 
 resource "template_file" "website" {
   depends_on = ["null_resource.clone"]
-  template = "${file("deps/website.tpl")}"
+  template = "${file("templates/deps-website.tpl")}"
   vars {
-    signatory = "${aws_api_gateway_resource.signatory.path}"
+    # we should be getting this id programmatically, but rn the whole jawn is handled through claudia so no dice
+    signatory = "https://wqm4pi6z77.execute-api.us-east-1.amazonaws.com/latest/sign"
     region = "us-east-1"
     bucket = "${aws_s3_bucket.website.bucket}"
   }
@@ -204,7 +197,7 @@ resource "aws_iam_role_policy" "signatory_lambda_policy" {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "Stmt1458531615000",
+      "Sid": "",
       "Effect": "Allow",
       "Action": [
         "s3:AbortMultipartUpload",
@@ -217,6 +210,16 @@ resource "aws_iam_role_policy" "signatory_lambda_policy" {
         "arn:aws:s3:::${var.gifs_s3_bucket}",
         "arn:aws:s3:::${var.gifs_s3_bucket}/*"
       ]
+    },
+    {
+      "Sid": "",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:*"
     }
   ]
 }
@@ -233,106 +236,132 @@ resource "aws_iam_role" "signatory_lambda_role" {
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "",
       "Action": "sts:AssumeRole",
       "Principal": {
         "Service": "lambda.amazonaws.com"
       },
-      "Effect": "Allow",
-      "Sid": ""
+      "Effect": "Allow"
     }
   ]
 }
 EOF
 }
 
-# create a function to sign s3 upload requests using that role
-# https://github.com/radblock/gimme
-
-resource "aws_lambda_function" "signatory" {
-  depends_on = ["null_resource.build_signatory"]
-  provider = "aws.prod"
-  filename = "repos/signatory.zip"
-  function_name = "upload_gif"
-  role = "${aws_iam_role.signatory_lambda_role.arn}"
-  handler = "main.handler"
-  # source_code_hash = "${base64sha256(file("repos/signatory.zip"))}"
-}
+# # create a function to sign s3 upload requests using that role
+# # https://github.com/radblock/gimme
+#
+# resource "aws_lambda_function" "signatory" {
+#   depends_on = ["null_resource.build_signatory"]
+#   provider = "aws.prod"
+#   filename = "repos/signatory.zip"
+#   function_name = "signatory"
+#   role = "${aws_iam_role.signatory_lambda_role.arn}"
+#   handler = "main.handler"
+#   # source_code_hash = "${base64sha256(file("repos/signatory.zip"))}"
+# }
 
 # the website needs to know about the signatory
 
-resource "template_file" "signatory" {
+resource "template_file" "signatory_deps" {
   depends_on = ["null_resource.clone"]
-  template = "${file("deps/signatory.tpl")}"
+  template = "${file("templates/deps-signatory.tpl")}"
   vars {
     bucket = "${aws_s3_bucket.gifs.bucket}"
   }
   provisioner "local-exec" {
-    command = "echo '${template_file.signatory.rendered}' > repos/signatory/deps.json"
+    command = "echo '${template_file.signatory_deps.rendered}' > repos/signatory/deps.json"
   }
 }
 
 # build the signatory
 
 resource "null_resource" "build_signatory" {
-  depends_on = ["template_file.signatory"]
+  depends_on = ["template_file.signatory_deps", "aws_iam_role.signatory_lambda_role"]
   provisioner "local-exec" {
-    command = "cd repos/gimme ; npm run deploy ; zip -r ../signatory.zip ."
+    command = "cd repos/signatory ; npm run deploy"
   }
 }
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# api gateway crap to make the signatory function visible
-# amazon says they're gonna change this so we need less crap here
-
-resource "aws_api_gateway_rest_api" "signatory" {
-  name = "signatory_api"
-}
-
-resource "aws_api_gateway_resource" "signatory" {
-  rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-  parent_id = "${aws_api_gateway_rest_api.signatory.root_resource_id}"
-  path_part = "signatory"
-}
-
-resource "aws_api_gateway_deployment" "signatory" {
-  depends_on = ["aws_api_gateway_integration.signatory"]
-  stage_name = "prod"
-  rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-}
-
-# the POST method triggers the lambda function
-
-resource "aws_api_gateway_method" "signatory" {
-  rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-  resource_id = "${aws_api_gateway_resource.signatory.id}"
-  http_method = "POST"
-  authorization = "NONE"
-}
-resource "aws_api_gateway_integration" "signatory" {
-  rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-  resource_id = "${aws_api_gateway_resource.signatory.id}"
-  http_method = "${aws_api_gateway_method.signatory.http_method}"
-  type = "AWS"
-  integration_http_method = "${aws_api_gateway_method.signatory.http_method}"
-  uri = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/${aws_lambda_function.signatory.arn}/invocations"
-}
-
-# the OPTIONS method is necessary for CORS
-# http://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
-
-resource "aws_api_gateway_method" "signatory_options" {
-  rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-  resource_id = "${aws_api_gateway_resource.signatory.id}"
-  http_method = "OPTIONS"
-  authorization = "NONE"
-}
-resource "aws_api_gateway_integration" "signatory_options" {
-  rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-  resource_id = "${aws_api_gateway_resource.signatory.id}"
-  http_method = "${aws_api_gateway_method.signatory_options.http_method}"
-  type = "MOCK"
-  integration_http_method = "${aws_api_gateway_method.signatory_options.http_method}"
-}
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# # api gateway crap to make the signatory function visible
+# # amazon says they're gonna change this so we need less crap here
+#
+# resource "aws_api_gateway_rest_api" "signatory" {
+#   name = "signatory_api"
+# }
+#
+# resource "aws_api_gateway_resource" "signatory" {
+#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+#   parent_id = "${aws_api_gateway_rest_api.signatory.root_resource_id}"
+#   path_part = "signatory"
+# }
+#
+# resource "aws_api_gateway_deployment" "signatory" {
+#   depends_on = ["aws_api_gateway_integration.signatory"]
+#   stage_name = "prod"
+#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+# }
+#
+# # the POST method triggers the lambda function
+#
+# resource "aws_api_gateway_method" "signatory" {
+#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+#   resource_id = "${aws_api_gateway_resource.signatory.id}"
+#   http_method = "POST"
+#   authorization = "NONE"
+# }
+# resource "aws_api_gateway_integration" "signatory" {
+#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+#   resource_id = "${aws_api_gateway_resource.signatory.id}"
+#   http_method = "${aws_api_gateway_method.signatory.http_method}"
+#   type = "AWS"
+#   integration_http_method = "${aws_api_gateway_method.signatory.http_method}"
+#   uri = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/${aws_lambda_function.signatory.arn}/invocations"
+# }
+# resource "aws_api_gateway_method_response" "signatory" {
+#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+#   resource_id = "${aws_api_gateway_resource.signatory.id}"
+#   http_method = "${aws_api_gateway_method.signatory.http_method}"
+#   status_code = "200"
+# }
+# resource "aws_api_gateway_integration_response" "signatory" {
+#   depends_on = ["aws_api_gateway_integration.signatory"]
+#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+#   resource_id = "${aws_api_gateway_resource.signatory.id}"
+#   http_method = "${aws_api_gateway_method.signatory.http_method}"
+#   status_code = "${aws_api_gateway_method_response.signatory.status_code}"
+# }
+#
+# # the OPTIONS method is necessary for CORS
+# # http://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
+#
+# resource "aws_api_gateway_method" "signatory_options" {
+#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+#   resource_id = "${aws_api_gateway_resource.signatory.id}"
+#   http_method = "OPTIONS"
+#   authorization = "NONE"
+# }
+# resource "aws_api_gateway_integration" "signatory_options" {
+#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+#   resource_id = "${aws_api_gateway_resource.signatory.id}"
+#   http_method = "${aws_api_gateway_method.signatory_options.http_method}"
+#   type = "MOCK"
+#   integration_http_method = "${aws_api_gateway_method.signatory_options.http_method}"
+# }
+# resource "aws_api_gateway_method_response" "signatory_options" {
+#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+#   resource_id = "${aws_api_gateway_resource.signatory.id}"
+#   http_method = "${aws_api_gateway_method.signatory_options.http_method}"
+#   status_code = "200"
+# }
+# resource "aws_api_gateway_integration_response" "signatory_options" {
+#   depends_on = ["aws_api_gateway_integration.signatory_options"]
+#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
+#   resource_id = "${aws_api_gateway_resource.signatory.id}"
+#   http_method = "${aws_api_gateway_method.signatory_options.http_method}"
+#   status_code = "${aws_api_gateway_method_response.signatory_options.status_code}"
+# }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #
@@ -358,7 +387,7 @@ resource "aws_iam_role_policy" "list_s3_bucket_lambda_policy" {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "Stmt1458531615000",
+      "Sid": "",
       "Effect": "Allow",
       "Action": [
         "*"
@@ -367,6 +396,16 @@ resource "aws_iam_role_policy" "list_s3_bucket_lambda_policy" {
         "arn:aws:s3:::${var.gifs_s3_bucket}",
         "arn:aws:s3:::${var.list_s3_bucket}/*"
       ]
+    },
+    {
+      "Sid": "",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:*"
     }
   ]
 }
@@ -383,12 +422,12 @@ resource "aws_iam_role" "list_s3_bucket_lambda_role" {
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "",
       "Action": "sts:AssumeRole",
       "Principal": {
         "Service": "lambda.amazonaws.com"
       },
-      "Effect": "Allow",
-      "Sid": ""
+      "Effect": "Allow"
     }
   ]
 }
@@ -401,7 +440,7 @@ EOF
 resource "aws_lambda_function" "list_s3_bucket" {
   depends_on = ["null_resource.build_list_s3_bucket"]
   provider = "aws.prod"
-  filename = "repos/list-s3-bucket.zip"
+  filename = "repos/list_s3_bucket.zip"
   function_name = "list_s3_bucket"
   role = "${aws_iam_role.list_s3_bucket_lambda_role.arn}"
   handler = "main.handler"
@@ -438,7 +477,7 @@ resource "aws_lambda_permission" "allow_bucket" {
 
 resource "template_file" "list_s3_bucket" {
   depends_on = ["null_resource.clone"]
-  template = "${file("deps/list-s3-bucket.tpl")}"
+  template = "${file("templates/deps-list-s3-bucket.tpl")}"
   vars {
     gif_bucket = "${aws_s3_bucket.gifs.bucket}"
     list_bucket = "${aws_s3_bucket.list.bucket}"
