@@ -39,6 +39,23 @@ provider "aws" {
   secret_key = "${var.secret_key}"
 }
 
+# this script goes and downloads other repos into a folder called "repos".
+# currently, - radblock/signatory, 
+#            - radblock/list-s3-bucket,
+#            - radblock/website
+
+resource "null_resource" "clone" {
+  provisioner "local-exec" {
+    command = "./provision.sh"
+  }
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+#
+#   domain name setup
+#
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
 resource "aws_route53_zone" "primary" {
    name = "radblock.xyz"
 }
@@ -54,12 +71,6 @@ resource "aws_route53_record" "ns" {
     "${aws_route53_zone.primary.name_servers.2}",
     "${aws_route53_zone.primary.name_servers.3}"
   ]
-}
-
-resource "null_resource" "clone" {
-  provisioner "local-exec" {
-    command = "./provision.sh"
-  }
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -266,19 +277,6 @@ resource "aws_iam_role" "signatory_lambda_role" {
 EOF
 }
 
-# # create a function to sign s3 upload requests using that role
-# # https://github.com/radblock/gimme
-#
-# resource "aws_lambda_function" "signatory" {
-#   depends_on = ["null_resource.build_signatory"]
-#   provider = "aws.prod"
-#   filename = "repos/signatory.zip"
-#   function_name = "signatory"
-#   role = "${aws_iam_role.signatory_lambda_role.arn}"
-#   handler = "main.handler"
-#   # source_code_hash = "${base64sha256(file("repos/signatory.zip"))}"
-# }
-
 # the website needs to know about the signatory
 
 resource "template_file" "signatory_deps" {
@@ -292,6 +290,18 @@ resource "template_file" "signatory_deps" {
   }
 }
 
+# amazon api gateway isn't fully supported by the current version of terraform
+# see: https://github.com/hashicorp/terraform/issues/6092
+#
+# instead of using terraform to set up our signatory lambda function
+# we're using claudia: https://github.com/claudiajs/claudia
+# because it sets up amazon api gateway properly
+#
+# this build_signatory resource calls the signatory's deploy script
+# which in turn calls claudia and delpoys to lambda
+# claudia is configured to use the signatory_lambda_role set up above
+# that configuration lives in package.json in radblock/signatory
+
 # build the signatory
 
 resource "null_resource" "build_signatory" {
@@ -300,86 +310,6 @@ resource "null_resource" "build_signatory" {
     command = "cd repos/signatory ; npm run deploy"
   }
 }
-
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# # api gateway crap to make the signatory function visible
-# # amazon says they're gonna change this so we need less crap here
-#
-# resource "aws_api_gateway_rest_api" "signatory" {
-#   name = "signatory_api"
-# }
-#
-# resource "aws_api_gateway_resource" "signatory" {
-#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-#   parent_id = "${aws_api_gateway_rest_api.signatory.root_resource_id}"
-#   path_part = "signatory"
-# }
-#
-# resource "aws_api_gateway_deployment" "signatory" {
-#   depends_on = ["aws_api_gateway_integration.signatory"]
-#   stage_name = "prod"
-#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-# }
-#
-# # the POST method triggers the lambda function
-#
-# resource "aws_api_gateway_method" "signatory" {
-#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-#   resource_id = "${aws_api_gateway_resource.signatory.id}"
-#   http_method = "POST"
-#   authorization = "NONE"
-# }
-# resource "aws_api_gateway_integration" "signatory" {
-#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-#   resource_id = "${aws_api_gateway_resource.signatory.id}"
-#   http_method = "${aws_api_gateway_method.signatory.http_method}"
-#   type = "AWS"
-#   integration_http_method = "${aws_api_gateway_method.signatory.http_method}"
-#   uri = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/${aws_lambda_function.signatory.arn}/invocations"
-# }
-# resource "aws_api_gateway_method_response" "signatory" {
-#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-#   resource_id = "${aws_api_gateway_resource.signatory.id}"
-#   http_method = "${aws_api_gateway_method.signatory.http_method}"
-#   status_code = "200"
-# }
-# resource "aws_api_gateway_integration_response" "signatory" {
-#   depends_on = ["aws_api_gateway_integration.signatory"]
-#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-#   resource_id = "${aws_api_gateway_resource.signatory.id}"
-#   http_method = "${aws_api_gateway_method.signatory.http_method}"
-#   status_code = "${aws_api_gateway_method_response.signatory.status_code}"
-# }
-#
-# # the OPTIONS method is necessary for CORS
-# # http://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
-#
-# resource "aws_api_gateway_method" "signatory_options" {
-#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-#   resource_id = "${aws_api_gateway_resource.signatory.id}"
-#   http_method = "OPTIONS"
-#   authorization = "NONE"
-# }
-# resource "aws_api_gateway_integration" "signatory_options" {
-#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-#   resource_id = "${aws_api_gateway_resource.signatory.id}"
-#   http_method = "${aws_api_gateway_method.signatory_options.http_method}"
-#   type = "MOCK"
-#   integration_http_method = "${aws_api_gateway_method.signatory_options.http_method}"
-# }
-# resource "aws_api_gateway_method_response" "signatory_options" {
-#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-#   resource_id = "${aws_api_gateway_resource.signatory.id}"
-#   http_method = "${aws_api_gateway_method.signatory_options.http_method}"
-#   status_code = "200"
-# }
-# resource "aws_api_gateway_integration_response" "signatory_options" {
-#   depends_on = ["aws_api_gateway_integration.signatory_options"]
-#   rest_api_id = "${aws_api_gateway_rest_api.signatory.id}"
-#   resource_id = "${aws_api_gateway_resource.signatory.id}"
-#   http_method = "${aws_api_gateway_method.signatory_options.http_method}"
-#   status_code = "${aws_api_gateway_method_response.signatory_options.status_code}"
-# }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 #
@@ -467,6 +397,10 @@ resource "aws_lambda_function" "list_s3_bucket" {
     command = "cd repos/list_s3_bucket ; zip -r repos/list_s3_bucket.zip ."
   }
 }
+
+# this is broken in the current version of terraform
+# we have to set it up manually
+# it's a pain
 
 # # make the s3 bucket notify the lambda function of its changes
 # # terraform claims to support this but I keep getting an error like they don't
